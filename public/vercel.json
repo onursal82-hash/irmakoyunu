@@ -1,0 +1,21 @@
+{
+  "cleanUrls": true,
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)\\.(png|jpg|jpeg|gif|mp3|wav|js|css|json)", "destination": "/$1.$2" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)\\.(png|jpg|jpeg|gif|mp3|wav|js|css|json)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*)\\.mp3",
+      "headers": [
+        { "key": "Content-Type", "value": "audio/mpeg" }
+      ]
+    }
+  ]
+}
