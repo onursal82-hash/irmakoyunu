@@ -825,16 +825,28 @@ class FuelStation extends Entity {
         super(x, y, 128, 128, game.assets.getImage('FuelStation')); // Doubled size
         this.game = game;
         this.vy = 0;
+        this.health = 3; // Robust Stations
     }
 
     update(dt) {
-        this.y += CONFIG.scrollSpeed * dt;
+        const speedMult = this.game.getSpeedMultiplier();
+        this.y += CONFIG.scrollSpeed * speedMult * dt;
         if (this.y > CONFIG.canvasHeight + 100) this.markedForDeletion = true;
+    }
+
+    takeDamage() {
+        this.health--;
+        if (this.health <= 0) {
+            this.markedForDeletion = true;
+            this.game.explode(this.x + 64, this.y + 64, false, false, 'explosion2');
+        } else {
+            this.game.spawnSparkle(this.x + 64, this.y + 64);
+        }
     }
 }
 
 class Enemy extends Entity {
-    constructor(game, x, y, type, speedMultiplier) {
+    constructor(game, x, y, type) {
         let imgKey = 'Enemy_Jet';
         let w = 128, h = 128; // Doubled size
         let hp = 1;
@@ -852,7 +864,7 @@ class Enemy extends Entity {
         this.startX = x;
         
         this.flashTime = 0;
-        this.speedMultiplier = speedMultiplier;
+        
         // 2. Enemy Evolution: Jets shoot after 90s
         this.canShoot = (type === 'heli' || type === 'carrier');
         if (type === 'jet' && game.gameTime > 90) {
@@ -866,28 +878,36 @@ class Enemy extends Entity {
         
         // 4. Speed Sync: Constant speed, straight line
         if (this.type === 'jet') {
-            this.vy = 300 * this.speedMultiplier; // Fast
+            this.vy = 300; // Fast
         } else if (this.type === 'heli') {
-            this.vy = 150 * this.speedMultiplier; // Medium
+            this.vy = 150; // Medium
         } else if (this.type === 'boat') {
             this.vy = 0; // Moves with river scroll in update
         } else if (this.type === 'carrier') {
-            this.vy = 80 * this.speedMultiplier; // Slow
+            this.vy = 80; // Slow
         }
     }
 
     update(dt) {
         this.time += dt;
+        const speedMult = this.game.getSpeedMultiplier();
 
         // 2. No More Zig-Zags: Straight Line Logic
         // Removed Sine wave for Heli
         
         if (this.type === 'boat') {
-             this.y += CONFIG.scrollSpeed * dt; 
+             this.y += CONFIG.scrollSpeed * speedMult * dt; 
         }
 
         // Apply Velocity (Vertical)
-        this.y += this.vy * dt;
+        this.y += this.vy * speedMult * dt;
+        
+        // 3. Advanced Enemy AI (2-Minute Mark)
+        // Evasive Maneuvers for Heli
+        if (this.type === 'heli' && this.game.gameTime > 120) {
+            // Sine wave pattern
+            this.x += Math.sin(this.time * 3) * 150 * dt;
+        }
         
         // --- DIFFICULTY LOGIC: No shooting in first 2 minutes (120s), EXCEPT BOSS ---
         // UPDATE: Jets shoot after 90s (Combat Phase)
@@ -898,7 +918,7 @@ class Enemy extends Entity {
                 this.shootTimer -= dt;
                 if (this.shootTimer <= 0) {
                     let baseRate = this.type === 'carrier' ? 1.5 : 3.0;
-                    this.shootTimer = (Math.random() * baseRate + 1) / this.game.difficultyMultiplier; 
+                    this.shootTimer = (Math.random() * baseRate + 1) / speedMult; 
                     
                     // Fire bullet straight down
                     // Visuals: Enemy bullet handled in Bullet class via isEnemy flag
@@ -1063,6 +1083,15 @@ class Game {
         // so explicit resize logic here is mainly for the container style which is handled by CSS.
     }
 
+    getSpeedMultiplier() {
+        const t = this.gameTime;
+        if (t < 30) return 1.0;
+        if (t < 60) return 1.15;
+        // After 60s: Increase by 10% compounding every 30 seconds.
+        const periods = Math.floor((t - 60) / 30) + 1;
+        return 1.15 * Math.pow(1.10, periods);
+    }
+
     start() {
         this.paused = false;
         document.getElementById('start-overlay').style.display = 'none';
@@ -1120,7 +1149,7 @@ class Game {
              // Spawn Boss (Top, centered)
              const safeWidth = CONFIG.canvasWidth - (this.bankWidth * 2) - 128;
              const spawnX = this.bankWidth + (safeWidth / 2) - 64; 
-             this.enemies.push(new Enemy(this, spawnX, -300, 'carrier', this.difficultyMultiplier));
+             this.enemies.push(new Enemy(this, spawnX, -300, 'carrier'));
         }
 
         this.enemySpawnTimer -= dt;
@@ -1140,9 +1169,9 @@ class Game {
             const spawnY = -100;
             
             if (r < 0.4) {
-                this.enemies.push(new Enemy(this, spawnX, spawnY, 'heli', this.difficultyMultiplier));
+                this.enemies.push(new Enemy(this, spawnX, spawnY, 'heli'));
             } else {
-                this.enemies.push(new Enemy(this, spawnX, spawnY, 'jet', this.difficultyMultiplier));
+                this.enemies.push(new Enemy(this, spawnX, spawnY, 'jet'));
             }
         }
 
@@ -1212,7 +1241,7 @@ class Game {
 
         this.gameTime += dt;
         // Difficulty multiplier still affects speed/spawn, but firing is handled in Enemy update
-        this.difficultyMultiplier = 1 + (this.gameTime / CONFIG.difficultyTimeScale);
+        this.difficultyMultiplier = this.getSpeedMultiplier();
 
         this.fuel -= CONFIG.fuelDrainRate * dt;
         if (this.fuel <= 0) {
@@ -1240,9 +1269,9 @@ class Game {
             this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
 
-        this.bgY += CONFIG.scrollSpeed * dt;
+        this.bgY += CONFIG.scrollSpeed * this.difficultyMultiplier * dt;
         if (this.bgY >= CONFIG.canvasHeight) this.bgY -= CONFIG.canvasHeight; 
-
+        
         this.player.update(dt);
         this.spawnLevelElements(dt);
 
@@ -1304,8 +1333,7 @@ class Game {
                 if (b.markedForDeletion || f.markedForDeletion) return;
                 if (b.collidesWith(f)) {
                     b.markedForDeletion = true;
-                    f.markedForDeletion = true;
-                    this.explode(f.x + 64, f.y + 64, false, false, 'explosion2'); // Adjusted offset
+                    f.takeDamage();
                 }
             });
         });
@@ -1350,7 +1378,7 @@ class Game {
         if (this.lives <= 0) {
             this.handleGameOver();
         } else {
-            if (fuelEmpty) this.fuel = CONFIG.maxFuel; 
+            if (fuelEmpty) this.fuel = 100; 
             else this.fuel = Math.max(20, this.fuel); 
 
             this.player.resetPosition();
